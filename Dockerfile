@@ -5,3 +5,7 @@ VOLUME ["/job/data", "/job/src", "/job/work", "/job/output"]
 
 # You should install any dependencies you need here.
 # RUN pip install tqdm
+RUN pip install nltk
+RUN pip install datasets
+RUN pip install tqdm
+RUN python -m nltk.downloader punkt
