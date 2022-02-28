@@ -144,7 +144,6 @@ def train(train_input, train_targets, model, loss_fn, optimizer, epochs=1):
     for epoch in range(epochs):
         model.train()
         input = train_input.copy()
-        print('len(input):', len(input))
         targets = train_targets.copy()
         training_data = zip(input, targets)
         tqdm_train_loader = tqdm(training_data, desc="Iteration")
@@ -176,7 +175,6 @@ def evaluate(test_data, model, char_to_idx, idx_to_char):
         inputs.append([char_to_idx[c] for c in sentence[-1]])
 
     model.eval()
-    print('INPU:', inputs)
     with torch.no_grad():
         for input in inputs:
             input = torch.tensor(input).to(device)
