@@ -1,64 +1,195 @@
-#!/usr/bin/env python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader
+
 import os
-import string
+from pathlib import Path
+from ast import literal_eval
 import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from datasets import load_dataset
+import nltk
+from nltk import word_tokenize
+from tqdm import tqdm
+
+torch.manual_seed(1)
 
 
-class MyModel:
-    """
-    This is a starter model to get you started. Feel free to modify this file.
-    """
+def load_training_data():
+    def build_vocab(train_data):
+        # x = 'Happy New Yea That’s one small ste one giant leap for mankin'
+        # x = set(x)
+        # char_to_idx = {c: j for j, c in enumerate(x)}
+        char_to_idx = {"'": 0}
+        for seq in train_data:
+            for c in seq:
+                if c not in char_to_idx:
+                    char_to_idx[c] = len(char_to_idx)
+        idx_to_char = {j: c for c, j in char_to_idx.items()}
+        return char_to_idx, idx_to_char
+    # your code here
+    # this particular model doesn't train
+    # adding more languages other than English to be a little more robust/generalizable
+    top_languages = ['english', 'spanish', 'chinese_simplified', 'hindi', 'arabic']
+    # lang_datasets = [load_dataset('csebuetnlp/xlsum', lang, split='train') for lang in top_languages]
 
-    @classmethod
-    def load_training_data(cls):
-        # your code here
-        # this particular model doesn't train
-        return []
+    # manually reading data because load_dataset caused disk quota exceeded error
+    lang_datasets = []
+    for lang in ['english']:
+        path = Path('./XLSum_complete_v2.0/{}_train.jsonl'.format(lang))
+        with open(path, 'rb') as f:
+            json_list = [literal_eval(line.decode('utf8')) for line in f]
+            lang_datasets.append(json_list)
 
-    @classmethod
-    def load_test_data(cls, fname):
-        # your code here
-        data = []
-        with open(fname) as f:
-            for line in f:
-                inp = line[:-1]  # the last character is a newline
-                data.append(inp)
-        return data
+    sentences = []
+    max_len = 10000
+    # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
+    num_rows = 200  # 2
+    for dataset in lang_datasets:
+        for i in range(num_rows):
+            sentences.append(dataset[i]['text'][:max_len])
 
-    @classmethod
-    def write_pred(cls, preds, fname):
-        with open(fname, 'wt') as f:
-            for p in preds:
-                f.write('{}\n'.format(p))
+    char_to_idx, idx_to_char = build_vocab(sentences)
 
-    def run_train(self, data, work_dir):
-        # your code here
-        pass
+    # for i in range(len(sentences)):
+    #     if i % 100 == 0:
+    #         print('Example:', i, len(sentences[i]), max_len)
+    #     while len(sentences[i]) < max_len:
+    #         sentences[i] += ' '
 
-    def run_pred(self, data):
-        # your code here
-        preds = []
-        all_chars = string.ascii_letters
-        for inp in data:
-            # this model just predicts a random character each time
-            top_guesses = [random.choice(all_chars) for _ in range(3)]
-            preds.append(''.join(top_guesses))
-        return preds
+    input = []
+    targets = []
+    for i, sentence in enumerate(sentences):
+        input.append([char_to_idx[c] for c in sentence[:-1]])
+        targets.append([char_to_idx[c] for c in sentence[1:]])
 
-    def save(self, work_dir):
-        # your code here
-        # this particular model has nothing to save, but for demonstration purposes we will save a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'wt') as f:
-            f.write('dummy save')
+    print('len(input):', len(input))
+    # input = torch.tensor(input)
+    # targets = torch.tensor(targets)
 
-    @classmethod
-    def load(cls, work_dir):
-        # your code here
-        # this particular model has nothing to load, but for demonstration purposes we will load a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint')) as f:
-            dummy_save = f.read()
-        return MyModel()
+    return input, targets, char_to_idx, idx_to_char
+
+
+def load_test_data(fname):
+    # your code here
+    data = []
+    with open(fname) as f:
+        for line in f:
+            inp = line[:-1]  # the last character is a newline
+            data.append(inp)
+    return data
+
+
+def write_pred(preds, fname):
+    with open(fname, 'wt') as f:
+        for p in preds:
+            f.write('{}\n'.format(p))
+
+
+def save(model, work_dir):
+    torch.save(model.state_dict(), os.path.join(work_dir, 'model.checkpoint'))
+
+
+def load(model, work_dir):
+    # checkpoint = torch.load(work_dir, map_location='cpu')
+    # model.load_state_dict(checkpoint)
+    model.load_state_dict(torch.load(os.path.join(work_dir, 'model.checkpoint')))
+
+
+class Text_Dataset(torch.utils.data.Dataset):
+    def __init__(self, input, targets):
+        self.input = input
+        self.targets = targets
+
+    def __getitem__(self, idx):
+        return input[idx], targets[idx]
+
+    def __len__(self):
+        return len(self.targets)
+
+
+EMBEDDING_DIM = 512
+HIDDEN_DIM = 512
+
+
+class LSTMGenerator(nn.Module):
+
+    def __init__(self, embedding_dim, hidden_dim, vocab_size, output_size):
+        super(LSTMGenerator, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
+
+        # The LSTM takes word embeddings as inputs, and outputs hidden states
+        # with dimensionality hidden_dim.
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+
+        # The linear layer that maps from hidden state space to tag space
+        self.fc = nn.Linear(hidden_dim, output_size)
+
+    def forward(self, sentence):
+        embeds = self.word_embeddings(sentence)
+        lstm_out, _ = self.lstm(embeds.view(len(sentence), 1, -1))
+        output = self.fc(lstm_out.view(len(sentence), -1))
+        # output_scores = F.log_softmax(output, dim=1)
+        return output
+
+
+def train(train_input, train_targets, model, loss_fn, optimizer, epochs=1):
+    train_correct = 0
+    num_targets = 0
+
+    for epoch in range(epochs):
+        model.train()
+        input = train_input.copy()
+        print('len(input):', len(input))
+        targets = train_targets.copy()
+        training_data = zip(input, targets)
+        tqdm_train_loader = tqdm(training_data, desc="Iteration")
+        for input, targets in tqdm_train_loader:
+            input = torch.tensor(input)
+            targets = torch.tensor(targets)
+            input = input.to(device)
+            targets = targets.to(device)
+
+            model.zero_grad()
+
+            scores = model(input)
+
+            loss = loss_fn(scores, targets.view(-1))
+            loss.backward()
+            optimizer.step()
+
+            preds = torch.argmax(scores, dim=1)
+            correct = torch.sum(torch.eq(preds, targets))
+            train_correct += correct
+            num_targets += len(targets)
+            tqdm_train_loader.set_description_str(f"[Acc]: {(train_correct / num_targets):.4f}")
+
+
+def evaluate(test_data, model, char_to_idx, idx_to_char):
+    preds_list = []
+    inputs = []
+    for i, sentence in enumerate(test_data):
+        inputs.append([char_to_idx[c] for c in sentence[-1]])
+
+    model.eval()
+    print('INPU:', inputs)
+    with torch.no_grad():
+        for input in inputs:
+            input = torch.tensor(input).to(device)
+            scores = model(input)
+            prob = F.softmax(scores[-1], dim=0).data
+            print('char_indices:', torch.topk(prob, 3, dim=0))
+            char_indices = torch.topk(prob, 3, dim=0)[1]
+            preds_chars = ''
+            for c_idx in char_indices:
+                preds_chars += idx_to_char[c_idx.item()]
+            preds_list.append(preds_chars)
+
+    return preds_list
 
 
 if __name__ == '__main__':
@@ -69,29 +200,56 @@ if __name__ == '__main__':
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
     args = parser.parse_args()
 
+    is_cuda = torch.cuda.is_available()
+
+    # Check if GPU is available
+    if is_cuda:
+        device = torch.device("cuda")
+        print("GPU is available")
+    else:
+        device = torch.device("cpu")
+        print("GPU not available, CPU used")
+
     random.seed(0)
 
     if args.mode == 'train':
         if not os.path.isdir(args.work_dir):
             print('Making working directory {}'.format(args.work_dir))
             os.makedirs(args.work_dir)
-        print('Instatiating model')
-        model = MyModel()
+
         print('Loading training data')
-        train_data = MyModel.load_training_data()
+        input, targets, char_to_idx, idx_to_char = load_training_data()
+        # train_data = zip(input, targets)
+        print('Instatiating model')
+        model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
+        loss_function = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.05)
         print('Training')
-        model.run_train(train_data, args.work_dir)
+        train(input, targets, model, loss_function, optimizer)
         print('Saving model')
-        model.save(args.work_dir)
+        save(model, args.work_dir)
+
+        print('Loading test data from {}'.format(args.test_data))
+        test_data = load_test_data(args.test_data)
+        print('Making predictions')
+        rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
+        print('Writing predictions to {}'.format(args.test_output))
+        write_pred(rnn_preds, args.test_output)
     elif args.mode == 'test':
         print('Loading model')
-        model = MyModel.load(args.work_dir)
-        print('Loading test data from {}'.format(args.test_data))
-        test_data = MyModel.load_test_data(args.test_data)
-        print('Making predictions')
-        pred = model.run_pred(test_data)
-        print('Writing predictions to {}'.format(args.test_output))
-        assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))
-        model.write_pred(pred, args.test_output)
+        # start_time = time.perf_counter()
+        # model = MyModel.load(args.work_dir)
+        # end_time = time.perf_counter()
+        # print("model loading took: " + str(end_time - start_time))
+        # print('Loading test data from {}'.format(args.test_data))
+        # test_data = MyModel.load_test_data(args.test_data)
+        # print('Making predictions')
+        # # unigram_pred, _, trigram_pred = model.run_pred(test_data)
+        # unigram_pred = model.run_pred(test_data)
+        # print('Writing predictions to {}'.format(args.test_output))
+        # # currently using unigram predictions
+        # assert len(unigram_pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(unigram_pred))
+        # model.write_pred(unigram_pred, args.test_output)
     else:
         raise NotImplementedError('Unknown mode {}'.format(args.mode))
+
