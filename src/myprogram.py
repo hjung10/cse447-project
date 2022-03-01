@@ -101,10 +101,14 @@ def save(model, char_to_idx, idx_to_char, work_dir):
     with open(os.path.join(work_dir, 'model.dictionary'), 'w') as output_json:
         json.dump(dictionaries, output_json)
 
-def load(model, work_dir):
+def load(model, work_dir, is_cuda):
     # checkpoint = torch.load(work_dir, map_location='cpu')
     # model.load_state_dict(checkpoint)
-    model.load_state_dict(torch.load(os.path.join(work_dir, 'model.checkpoint')))
+    if is_cuda:
+        model.load_state_dict(torch.load(os.path.join(work_dir, 'model.checkpoint')))
+    else: 
+        model.load_state_dict(torch.load(os.path.join(work_dir, 'model.checkpoint'), map_location=torch.device('cpu')))
+
 
 def load_dictionary(work_dir):
     path = Path(os.path.join(work_dir, 'model.dictionary'))
@@ -288,7 +292,7 @@ if __name__ == '__main__':
     elif args.mode == "dev":
         idx_to_char, char_to_idx = load_dictionary(args.work_dir)
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
-        load(model, args.work_dir)
+        load(model, args.work_dir, is_cuda)
         print('Loading test data from {}'.format(args.test_data))
         test_data = load_test_data(args.test_data)
         print('Making predictions')
@@ -299,7 +303,7 @@ if __name__ == '__main__':
         print('Loading model')
         idx_to_char, char_to_idx = load_dictionary(args.work_dir)
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
-        load(model, args.work_dir)
+        load(model, args.work_dir, is_cuda)
         print('Loading test data from {}'.format(args.test_data))
         test_data = load_test_data(args.test_data)
         print('Making predictions')
