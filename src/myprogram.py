@@ -9,6 +9,7 @@ from pathlib import Path
 from ast import literal_eval
 import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import math
 from datasets import load_dataset
 import nltk
 from nltk import word_tokenize
@@ -53,6 +54,7 @@ def load_training_data():
 
     char_to_idx, idx_to_char = build_vocab(sentences)
 
+    ## padding spaces at the end to max length
     # for i in range(len(sentences)):
     #     if i % 100 == 0:
     #         print('Example:', i, len(sentences[i]), max_len)
@@ -62,6 +64,7 @@ def load_training_data():
     input = []
     targets = []
     for i, sentence in enumerate(sentences):
+        sentence = ''.join(sentence.split())
         input.append([char_to_idx[c] for c in sentence[:-1]])
         targets.append([char_to_idx[c] for c in sentence[1:]])
 
@@ -98,16 +101,33 @@ def load(model, work_dir):
     model.load_state_dict(torch.load(os.path.join(work_dir, 'model.checkpoint')))
 
 
+# TODO: still in progress
 class Text_Dataset(torch.utils.data.Dataset):
-    def __init__(self, input, targets):
+    def __init__(self, input, targets, sequence_len, batch_size):
         self.input = input
         self.targets = targets
+        self.sequence_len = sequence_len
+        self.batch_size = batch_size
+
+        remainder = len(input) % self.batch_size
+        self.data = torch.LongTensor(input[:len(input) - remainder])
+        self.data = self.data.view(self.batch_size, -1)
+
+        self.sequences_in_batch = math.ceil((self.data.shape[1] - 1) / self.sequence_len)
 
     def __getitem__(self, idx):
-        return input[idx], targets[idx]
+        batch_idx = idx % self.batch_size
+        sequence_idx = idx // self.batch_size
+
+        start_idx = sequence_idx * self.sequence_len
+        self.input = self.input[batch_idx][start_idx: min(self.input.shape[1], start_idx + self.sequence_len + 1)]
+        self.targets = self.targets[batch_idx][start_idx: min(self.targets.shape[1], start_idx + self.sequence_len + 1)]
+        # return data[:-1], data[1:]
+        item = {'input': self.input[idx], 'targets': self.targets[idx]}
+        return item
 
     def __len__(self):
-        return len(self.targets)
+        return self.batch_size * self.sequences_in_batch
 
 
 EMBEDDING_DIM = 512
@@ -172,7 +192,7 @@ def evaluate(test_data, model, char_to_idx, idx_to_char):
     preds_list = []
     inputs = []
     for i, sentence in enumerate(test_data):
-        inputs.append([char_to_idx[c] for c in sentence[-1]])
+        inputs.append([char_to_idx[c] for c in sentence])
 
     model.eval()
     with torch.no_grad():
