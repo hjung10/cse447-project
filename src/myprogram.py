@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 import os
 from pathlib import Path
-from ast import literal_eval
+# from ast import literal_eval
 import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import math
@@ -36,7 +36,7 @@ def load_training_data():
     # your code here
     # this particular model doesn't train
     # adding more languages other than English to be a little more robust/generalizable
-    top_languages = ['english', 'spanish', 'chinese_simplified', 'russian'] # 'hindi', 'arabic'
+    top_languages = ['english', 'spanish', 'chinese_simplified', 'russian', 'hindi', 'japanese', "bengali"]
     lang_datasets = [load_dataset('csebuetnlp/xlsum', lang, split='train') for lang in top_languages]
 
     # manually reading data because load_dataset caused disk quota exceeded error
@@ -52,18 +52,12 @@ def load_training_data():
     sentences = []
     max_len = 10000
     # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
-    num_rows = 20000  # 2
+    num_rows = 5000  # 2
     for dataset in lang_datasets:
         for i in range(num_rows):
             sentences.append(dataset[i]['text'][:max_len])
 
     char_to_idx, idx_to_char = build_vocab(sentences)
-
-    # for i in range(len(sentences)):
-    #     if i % 100 == 0:
-    #         print('Example:', i, len(sentences[i]), max_len)
-    #     while len(sentences[i]) < max_len:
-    #         sentences[i] += ' '
 
     input = []
     targets = []
@@ -117,12 +111,10 @@ def load_dictionary(work_dir):
     with open(path, 'rb') as f:
         data = json.load(f)
 
-    print("starting conversion from json")
     idx_to_char = dict()
     char_to_idx = data["char_to_idx"]
     for k, v in data["idx_to_char"].items():
         idx_to_char[int(k)] = v 
-    print("finished conversion from json")
     return idx_to_char, char_to_idx
 
 
@@ -224,21 +216,23 @@ def evaluate(test_data, model, char_to_idx, idx_to_char):
     preds_list = []
     inputs = []
     for i, sentence in enumerate(test_data):
-        inputs.append([char_to_idx[c] for c in sentence])
+        inputs.append([char_to_idx[c] if c in char_to_idx else char_to_idx["<UNK>"] for c in sentence])
+
 
     model.eval()
     with torch.no_grad():
         for input in inputs:
             input = torch.tensor(input).unsqueeze(0)
             input = input.to(device)
-            print('eval input:', input)
             scores = model(input)
             prob = F.softmax(scores[-1], dim=0).data
-            print('char_indices:', torch.topk(prob, 3, dim=0))
             char_indices = torch.topk(prob, 3, dim=0)[1]
             preds_chars = ''
             for c_idx in char_indices:
-                preds_chars += idx_to_char[c_idx.item()]
+                index = c_idx.item()
+                if index == 1:
+                    index = random.randint(2, len(char_to_idx) - 1)
+                preds_chars += idx_to_char[index]
             preds_list.append(preds_chars)
 
     return preds_list
@@ -291,15 +285,6 @@ if __name__ == '__main__':
         train(train_dataloader, model, loss_function, optimizer)
         print('Saving model')
         save(model, char_to_idx, idx_to_char, args.work_dir)
-
-        
-
-        print('Loading test data from {}'.format(args.test_data))
-        test_data = load_test_data(args.test_data)
-        print('Making predictions')
-        rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
-        print('Writing predictions to {}'.format(args.test_output))
-        write_pred(rnn_preds, args.test_output)
     elif args.mode == "dev":
         idx_to_char, char_to_idx = load_dictionary(args.work_dir)
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
@@ -312,19 +297,15 @@ if __name__ == '__main__':
         write_pred(rnn_preds, args.test_output)
     elif args.mode == 'test':
         print('Loading model')
-        # start_time = time.perf_counter()
-        # model = MyModel.load(args.work_dir)
-        # end_time = time.perf_counter()
-        # print("model loading took: " + str(end_time - start_time))
-        # print('Loading test data from {}'.format(args.test_data))
-        # test_data = MyModel.load_test_data(args.test_data)
-        # print('Making predictions')
-        # # unigram_pred, _, trigram_pred = model.run_pred(test_data)
-        # unigram_pred = model.run_pred(test_data)
-        # print('Writing predictions to {}'.format(args.test_output))
-        # # currently using unigram predictions
-        # assert len(unigram_pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(unigram_pred))
-        # model.write_pred(unigram_pred, args.test_output)
+        idx_to_char, char_to_idx = load_dictionary(args.work_dir)
+        model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
+        load(model, args.work_dir)
+        print('Loading test data from {}'.format(args.test_data))
+        test_data = load_test_data(args.test_data)
+        print('Making predictions')
+        rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
+        print('Writing predictions to {}'.format(args.test_output))
+        write_pred(rnn_preds, args.test_output)
     else:
         raise NotImplementedError('Unknown mode {}'.format(args.mode))
 
