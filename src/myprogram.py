@@ -52,14 +52,13 @@ def load_training_data():
     sentences = []
     max_len = 10000
     # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
-    num_rows = 1000  # 2
+    num_rows = 20000  # 2
     for dataset in lang_datasets:
         for i in range(num_rows):
             sentences.append(dataset[i]['text'][:max_len])
 
     char_to_idx, idx_to_char = build_vocab(sentences)
 
-    ## padding spaces at the end to max length
     # for i in range(len(sentences)):
     #     if i % 100 == 0:
     #         print('Example:', i, len(sentences[i]), max_len)
@@ -70,12 +69,12 @@ def load_training_data():
     targets = []
     for i, sentence in enumerate(sentences):
         sentence = ''.join(sentence.split())
-        input.append([char_to_idx[c] for c in sentence[:-1]])
-        targets.append([char_to_idx[c] for c in sentence[1:]])
+        # input & targets are on continuous list of integers
+        input.extend([char_to_idx[c] for c in sentence[:-1]])
+        targets.extend([char_to_idx[c] for c in sentence[1:]])
 
-    print('len(input):', len(input))
-    # input = torch.tensor(input)
-    # targets = torch.tensor(targets)
+    input = torch.tensor(input)
+    targets = torch.tensor(targets)
 
     return input, targets, char_to_idx, idx_to_char
 
@@ -127,37 +126,35 @@ def load_dictionary(work_dir):
     return idx_to_char, char_to_idx
 
 
-# TODO: still in progress
 class Text_Dataset(torch.utils.data.Dataset):
-    def __init__(self, input, targets, sequence_len, batch_size):
-        self.input = input
-        self.targets = targets
+    def __init__(self, encoded_input, encoded_targets, sequence_len, batch_size):
+        self.encoded_input = encoded_input
+        self.encoded_targets = encoded_targets
         self.sequence_len = sequence_len
         self.batch_size = batch_size
 
-        remainder = len(input) % self.batch_size
-        self.data = torch.LongTensor(input[:len(input) - remainder])
-        self.data = self.data.view(self.batch_size, -1)
+        remainder = len(self.encoded_input) % self.batch_size
+        self.input = torch.LongTensor(self.encoded_input[:len(self.encoded_input) - remainder])
+        self.input = self.input.view(self.batch_size, -1)
 
-        self.sequences_in_batch = math.ceil((self.data.shape[1] - 1) / self.sequence_len)
+        self.targets = torch.LongTensor(self.encoded_targets[:len(self.encoded_targets) - remainder])
+        self.targets = self.targets.view(self.batch_size, -1)
+
+        self.sequences_in_batch = math.ceil((self.input.shape[1] - 1) / self.sequence_len)
 
     def __getitem__(self, idx):
         batch_idx = idx % self.batch_size
         sequence_idx = idx // self.batch_size
 
         start_idx = sequence_idx * self.sequence_len
-        self.input = self.input[batch_idx][start_idx: min(self.input.shape[1], start_idx + self.sequence_len + 1)]
-        self.targets = self.targets[batch_idx][start_idx: min(self.targets.shape[1], start_idx + self.sequence_len + 1)]
-        # return data[:-1], data[1:]
-        item = {'input': self.input[idx], 'targets': self.targets[idx]}
+        input = self.input[batch_idx][start_idx: min(self.input.shape[1], start_idx + self.sequence_len + 1)]
+        targets = self.targets[batch_idx][start_idx: min(self.targets.shape[1], start_idx + self.sequence_len + 1)]
+        # return input[:-1], input[1:]
+        item = {'input': input, 'targets': targets}
         return item
 
     def __len__(self):
         return self.batch_size * self.sequences_in_batch
-
-
-EMBEDDING_DIM = 512
-HIDDEN_DIM = 512
 
 
 class LSTMGenerator(nn.Module):
@@ -165,45 +162,54 @@ class LSTMGenerator(nn.Module):
     def __init__(self, embedding_dim, hidden_dim, vocab_size, output_size):
         super(LSTMGenerator, self).__init__()
         self.hidden_dim = hidden_dim
+        self.embedding_dim = embedding_dim
+        self.output_size = output_size
 
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
 
         # The LSTM takes word embeddings as inputs, and outputs hidden states
         # with dimensionality hidden_dim.
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
 
         # The linear layer that maps from hidden state space to tag space
         self.fc = nn.Linear(hidden_dim, output_size)
 
     def forward(self, sentence):
         embeds = self.word_embeddings(sentence)
-        lstm_out, _ = self.lstm(embeds.view(len(sentence), 1, -1))
-        output = self.fc(lstm_out.view(len(sentence), -1))
+        lstm_out, _ = self.lstm(embeds)
+        # lstm_out, _ = self.lstm(embeds.view(embeds.shape[0], 1, -1))
+        # lstm_out, _ = self.gru(embeds.view(len(sentence), 1, -1))
+        output = self.fc(lstm_out)
+        # output = self.fc(lstm_out.view(len(sentence), -1))
         # output_scores = F.log_softmax(output, dim=1)
+        output = output.reshape(-1, self.output_size)
         return output
 
 
-def train(train_input, train_targets, model, loss_fn, optimizer, epochs=1):
+def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input, train_targets
     train_correct = 0
     num_targets = 0
 
     for epoch in range(epochs):
         model.train()
-        input = train_input.copy()
-        targets = train_targets.copy()
-        training_data = zip(input, targets)
-        tqdm_train_loader = tqdm(training_data, desc="Iteration")
-        for input, targets in tqdm_train_loader:
-            input = torch.tensor(input)
-            targets = torch.tensor(targets)
-            input = input.to(device)
-            targets = targets.to(device)
+        # input = train_input.copy()
+        # targets = train_targets.copy()
+        # training_data = zip(input, targets)
+        # tqdm_train_loader = tqdm(training_data, desc="Iteration")
+        tqdm_train_loader = tqdm(train_dataloader, desc="Iteration")
+        for datum in tqdm_train_loader:  # input, targets
+            # input = torch.tensor(datum['input'])
+            # targets = torch.tensor(datum['targets'])
+            input = datum['input'].to(device)
+            targets = datum['targets'].to(device)
+            # input = input.to(device)
+            # targets = targets.to(device)
 
             model.zero_grad()
 
             scores = model(input)
-
-            loss = loss_fn(scores, targets.view(-1))
+            targets = targets.view(-1)
+            loss = loss_fn(scores, targets)
             loss.backward()
             optimizer.step()
 
@@ -218,23 +224,21 @@ def evaluate(test_data, model, char_to_idx, idx_to_char):
     preds_list = []
     inputs = []
     for i, sentence in enumerate(test_data):
-        inputs.append([char_to_idx[c] if c in char_to_idx else char_to_idx["<UNK>"] for c in sentence])
+        inputs.append([char_to_idx[c] for c in sentence])
 
     model.eval()
     with torch.no_grad():
         for input in inputs:
-            input = torch.tensor(input).to(device)
+            input = torch.tensor(input).unsqueeze(0)
+            input = input.to(device)
+            print('eval input:', input)
             scores = model(input)
             prob = F.softmax(scores[-1], dim=0).data
             print('char_indices:', torch.topk(prob, 3, dim=0))
-
             char_indices = torch.topk(prob, 3, dim=0)[1]
             preds_chars = ''
             for c_idx in char_indices:
-                index = c_idx.item()
-                if index == 1:
-                    index = random.randint(0, len(char_to_idx) - 1)
-                preds_chars += idx_to_char[index]
+                preds_chars += idx_to_char[c_idx.item()]
             preds_list.append(preds_chars)
 
     return preds_list
@@ -250,6 +254,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     is_cuda = torch.cuda.is_available()
+
+    EMBEDDING_DIM = 512
+    HIDDEN_DIM = 512
+    BATCH_SIZE = 64
 
     # Check if GPU is available
     if is_cuda:
@@ -268,13 +276,19 @@ if __name__ == '__main__':
 
         print('Loading training data')
         input, targets, char_to_idx, idx_to_char = load_training_data()
+        print('input targets:', input)
+        # print('INPUT SHAPE:', input.shape, targets.shape)
+        train_data = Text_Dataset(input, targets, 100, BATCH_SIZE)
+        # print('train_data:', len(train_data))
+        train_dataloader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=False)
         # train_data = zip(input, targets)
         print('Instatiating model')
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
         loss_function = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.05)
         print('Training')
-        train(input, targets, model, loss_function, optimizer)
+        # train(input, targets, model, loss_function, optimizer)
+        train(train_dataloader, model, loss_function, optimizer)
         print('Saving model')
         save(model, char_to_idx, idx_to_char, args.work_dir)
 
