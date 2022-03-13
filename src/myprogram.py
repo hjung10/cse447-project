@@ -11,10 +11,11 @@ import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import math
 from datasets import load_dataset
-import nltk
-from nltk import word_tokenize
 from tqdm import tqdm
 import json
+
+
+import time
 
 torch.manual_seed(1)
 
@@ -39,6 +40,9 @@ def load_training_data():
     top_languages = ['english', 'spanish', 'chinese_simplified', 'russian', 'hindi', 'japanese', "bengali"]
     lang_datasets = [load_dataset('csebuetnlp/xlsum', lang, split='train') for lang in top_languages]
 
+    min_lang = math.inf
+    for i in lang_datasets:
+        min_lang = min(min_lang, len(i))
     # manually reading data because load_dataset caused disk quota exceeded error
     """
     lang_datasets = []
@@ -52,7 +56,8 @@ def load_training_data():
     sentences = []
     max_len = 10000
     # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
-    num_rows = 5000  # 2
+    num_rows = 1000  # min_lang
+    print("The number of rows for each language is: " + str(num_rows))
     for dataset in lang_datasets:
         for i in range(num_rows):
             sentences.append(dataset[i]['text'][:max_len])
@@ -186,7 +191,12 @@ def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input
     train_correct = 0
     num_targets = 0
 
+
+    total_training_time = 0
+
     for epoch in range(epochs):
+        start_time = time.perf_counter()
+
         model.train()
         # input = train_input.copy()
         # targets = train_targets.copy()
@@ -214,6 +224,20 @@ def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input
             train_correct += correct
             num_targets += len(targets)
             tqdm_train_loader.set_description_str(f"[Acc]: {(train_correct / num_targets):.4f}")
+
+        # delete! 
+        end_time = time.perf_counter()
+        training_time = end_time - start_time
+        total_training_time += training_time
+        print("model training for epoch #" + str(epoch) + " took: " + str(training_time))
+
+        print("model total training time so far: " + total_training_time)
+
+        test_data = load_test_data(os.getcwd() + "/sample/input.txt")
+        rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
+        write_pred(rnn_preds, os.getcwd() + "pred.txt")
+        os.system("python grader/grade.py " + os.getcwd() + "pred.txt " + os.getcwd() + "/sample/answer.txt --verbose")
+
 
 
 def evaluate(test_data, model, char_to_idx, idx_to_char):
@@ -256,6 +280,7 @@ if __name__ == '__main__':
     EMBEDDING_DIM = 512
     HIDDEN_DIM = 512
     BATCH_SIZE = 64
+    EPOCHES = 3
 
     # Check if GPU is available
     if is_cuda:
@@ -283,10 +308,10 @@ if __name__ == '__main__':
         print('Instatiating model')
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
         loss_function = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.05)
+        optimizer = optim.Adam(model.parameters(), lr=0.01)
         print('Training')
         # train(input, targets, model, loss_function, optimizer)
-        train(train_dataloader, model, loss_function, optimizer)
+        train(train_dataloader, model, loss_function, optimizer, EPOCHES)
         print('Saving model')
         save(model, char_to_idx, idx_to_char, args.work_dir)
     elif args.mode == "dev":
