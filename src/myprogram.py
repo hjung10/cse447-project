@@ -277,10 +277,10 @@ if __name__ == '__main__':
 
     is_cuda = torch.cuda.is_available()
 
-    EMBEDDING_DIM = 512
-    HIDDEN_DIM = 512
+    EMBEDDING_DIM = 256
+    HIDDEN_DIM = 256
     BATCH_SIZE = 32
-    EPOCHES = 3
+    EPOCHES = 10
 
     # Check if GPU is available
     if is_cuda:
