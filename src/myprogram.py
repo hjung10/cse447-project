@@ -37,7 +37,7 @@ def load_training_data():
     # your code here
     # this particular model doesn't train
     # adding more languages other than English to be a little more robust/generalizable
-    top_languages = ['english', 'spanish', 'chinese_simplified', 'russian', 'hindi', 'japanese', "bengali"]
+    top_languages = ['english', 'spanish', 'chinese_simplified', 'russian', 'hindi', 'japanese', "bengali", "portuguese", "french"]
     lang_datasets = [load_dataset('csebuetnlp/xlsum', lang, split='train') for lang in top_languages]
 
     min_lang = math.inf
@@ -56,7 +56,7 @@ def load_training_data():
     sentences = []
     max_len = 10000
     # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
-    num_rows = 1000  # min_lang
+    num_rows = 7000  # min_lang
     print("The number of rows for each language is: " + str(num_rows))
     for dataset in lang_datasets:
         for i in range(num_rows):
@@ -170,7 +170,7 @@ class LSTMGenerator(nn.Module):
 
         # The LSTM takes word embeddings as inputs, and outputs hidden states
         # with dimensionality hidden_dim.
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=3, batch_first=True)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=2, batch_first=True)
 
         # The linear layer that maps from hidden state space to tag space
         self.fc = nn.Linear(hidden_dim, output_size)
@@ -231,7 +231,7 @@ def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input
         total_training_time += training_time
         print("model training for epoch #" + str(epoch) + " took: " + str(training_time))
 
-        print("model total training time so far: " + total_training_time)
+        print("model total training time so far: " + str(total_training_time))
 
         test_data = load_test_data(os.getcwd() + "/sample/input.txt")
         rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
@@ -279,7 +279,7 @@ if __name__ == '__main__':
 
     EMBEDDING_DIM = 512
     HIDDEN_DIM = 512
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
     EPOCHES = 3
 
     # Check if GPU is available
@@ -308,7 +308,7 @@ if __name__ == '__main__':
         print('Instatiating model')
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
         loss_function = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.01)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         print('Training')
         # train(input, targets, model, loss_function, optimizer)
         train(train_dataloader, model, loss_function, optimizer, EPOCHES)
