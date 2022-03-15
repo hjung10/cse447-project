@@ -272,7 +272,7 @@ if __name__ == '__main__':
     EMBEDDING_DIM = 512
     HIDDEN_DIM = 512
     BATCH_SIZE = 32
-    EPOCHES = 3
+    EPOCHES = 1
 
     # Check if GPU is available
     if is_cuda:
