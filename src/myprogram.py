@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader
 
 import os
 from pathlib import Path
-# from ast import literal_eval
 import random
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import math
@@ -19,12 +18,7 @@ torch.manual_seed(1)
 
 def load_training_data():
     def build_vocab(train_data):
-        # x = 'Happy New Yea That’s one small ste one giant leap for mankin'
-        # x = set(x)
-        # char_to_idx = {c: j for j, c in enumerate(x)}
-
-        # ~ represents UNK character
-        char_to_idx = {"'": 0, "<UNK>":1}
+        char_to_idx = {"'": 0, "<UNK>": 1}
         for seq in train_data:
             for c in seq:
                 if c not in char_to_idx:
@@ -163,21 +157,14 @@ class LSTMGenerator(nn.Module):
 
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
 
-        # The LSTM takes word embeddings as inputs, and outputs hidden states
-        # with dimensionality hidden_dim.
         self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=2, batch_first=True)
 
-        # The linear layer that maps from hidden state space to tag space
         self.fc = nn.Linear(hidden_dim, output_size)
 
     def forward(self, sentence):
         embeds = self.word_embeddings(sentence)
         lstm_out, _ = self.lstm(embeds)
-        # lstm_out, _ = self.lstm(embeds.view(embeds.shape[0], 1, -1))
-        # lstm_out, _ = self.gru(embeds.view(len(sentence), 1, -1))
         output = self.fc(lstm_out)
-        # output = self.fc(lstm_out.view(len(sentence), -1))
-        # output_scores = F.log_softmax(output, dim=1)
         output = output.reshape(-1, self.output_size)
         return output
 
@@ -191,18 +178,10 @@ def train(train_dataloader, model, loss_fn, optimizer, char_to_idx, idx_to_char,
     for epoch in range(epochs):
 
         model.train()
-        # input = train_input.copy()
-        # targets = train_targets.copy()
-        # training_data = zip(input, targets)
-        # tqdm_train_loader = tqdm(training_data, desc="Iteration")
         tqdm_train_loader = tqdm(train_dataloader, desc="Iteration")
-        for datum in tqdm_train_loader:  # input, targets
-            # input = torch.tensor(datum['input'])
-            # targets = torch.tensor(datum['targets'])
+        for datum in tqdm_train_loader:
             input = datum['input'].to(device)
             targets = datum['targets'].to(device)
-            # input = input.to(device)
-            # targets = targets.to(device)
 
             model.zero_grad()
 
@@ -272,7 +251,7 @@ if __name__ == '__main__':
     EMBEDDING_DIM = 512
     HIDDEN_DIM = 512
     BATCH_SIZE = 32
-    EPOCHES = 1
+    EPOCHES = 3
 
     # Check if GPU is available
     if is_cuda:
@@ -292,17 +271,13 @@ if __name__ == '__main__':
         print('Loading training data')
         input, targets, char_to_idx, idx_to_char = load_training_data()
         print('input targets:', input)
-        # print('INPUT SHAPE:', input.shape, targets.shape)
         train_data = Text_Dataset(input, targets, 100, BATCH_SIZE)
-        # print('train_data:', len(train_data))
         train_dataloader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=False)
-        # train_data = zip(input, targets)
         print('Instatiating model')
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
         loss_function = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
         print('Training')
-        # train(input, targets, model, loss_function, optimizer)
         train(train_dataloader, model, loss_function, optimizer, char_to_idx, idx_to_char, args.work_dir, EPOCHES)
         print('Saving model')
         save(model, char_to_idx, idx_to_char, args.work_dir)
