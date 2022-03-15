@@ -58,6 +58,7 @@ def load_training_data():
     # TODO: set this to be dataset.num_rows when we want to train on a larger set of data
     num_rows = 7000  # min_lang
     print("The number of rows for each language is: " + str(num_rows))
+
     for dataset in lang_datasets:
         for i in range(num_rows):
             sentences.append(dataset[i]['text'][:max_len])
@@ -95,7 +96,7 @@ def write_pred(preds, fname):
 
 
 def save(model, char_to_idx, idx_to_char, work_dir):
-    torch.save(model.state_dict(), os.path.join(work_dir, 'model.checkpoint'))
+    torch.save(model.state_dict(), os.path.join(work_dir, 'model.checkpoint1'))
     dictionaries = {
             'idx_to_char': idx_to_char,
             'char_to_idx': char_to_idx
@@ -103,7 +104,7 @@ def save(model, char_to_idx, idx_to_char, work_dir):
             # 'bigrams': self.bigrams_context_freq,
             # 'trigrams': self.trigrams_context_freq
         }
-    with open(os.path.join(work_dir, 'model.dictionary'), 'w') as output_json:
+    with open(os.path.join(work_dir, 'model.dictionary1'), 'w') as output_json:
         json.dump(dictionaries, output_json)
 
 def load(model, work_dir, is_cuda):
@@ -187,11 +188,11 @@ class LSTMGenerator(nn.Module):
         return output
 
 
-def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input, train_targets
+def train(train_dataloader, model, loss_fn, optimizer, char_to_idx, idx_to_char, work_dir, epochs=1):  # train_input, train_targets
     train_correct = 0
     num_targets = 0
 
-
+    best_dev_accuracy = 0
     total_training_time = 0
 
     for epoch in range(epochs):
@@ -230,15 +231,21 @@ def train(train_dataloader, model, loss_fn, optimizer, epochs=1):  # train_input
         training_time = end_time - start_time
         total_training_time += training_time
         print("model training for epoch #" + str(epoch) + " took: " + str(training_time))
-
         print("model total training time so far: " + str(total_training_time))
 
         test_data = load_test_data(os.getcwd() + "/sample/input.txt")
         rnn_preds = evaluate(test_data, model, char_to_idx, idx_to_char)
         write_pred(rnn_preds, os.getcwd() + "pred.txt")
         os.system("python grader/grade.py " + os.getcwd() + "pred.txt " + os.getcwd() + "/sample/answer.txt --verbose")
-
-
+        print("the best success rate so far is: " + str(best_dev_accuracy))
+        
+        current_dev_accuracy = 0
+        with open(os.getcwd() + "/sample/dev_accuracy.txt", 'r') as f:
+            current_dev_accuracy = float(f.readlines()[0][14:])
+            if current_dev_accuracy > best_dev_accuracy:
+                print("Current dev is better than previous best; saving the current (best) model now")
+                best_dev_accuracy = current_dev_accuracy
+                save(model, char_to_idx, idx_to_char, work_dir)
 
 def evaluate(test_data, model, char_to_idx, idx_to_char):
     preds_list = []
@@ -277,10 +284,10 @@ if __name__ == '__main__':
 
     is_cuda = torch.cuda.is_available()
 
-    EMBEDDING_DIM = 256
-    HIDDEN_DIM = 256
+    EMBEDDING_DIM = 1024
+    HIDDEN_DIM = 1024
     BATCH_SIZE = 32
-    EPOCHES = 10
+    EPOCHES = 3
 
     # Check if GPU is available
     if is_cuda:
@@ -308,10 +315,10 @@ if __name__ == '__main__':
         print('Instatiating model')
         model = LSTMGenerator(EMBEDDING_DIM, HIDDEN_DIM, len(char_to_idx), len(char_to_idx)).to(device)
         loss_function = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.0001)
         print('Training')
         # train(input, targets, model, loss_function, optimizer)
-        train(train_dataloader, model, loss_function, optimizer, EPOCHES)
+        train(train_dataloader, model, loss_function, optimizer, char_to_idx, idx_to_char, args.work_dir, EPOCHES)
         print('Saving model')
         save(model, char_to_idx, idx_to_char, args.work_dir)
     elif args.mode == "dev":

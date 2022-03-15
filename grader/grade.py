@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from argparse import ArgumentParser
+import os
 
 
 parser = ArgumentParser()
@@ -19,6 +20,10 @@ def load_pred(fname, force_limit=None):
             loaded.append(line)
         return loaded
 
+def write_dev_accuracy(correct, gold):
+    with open(os.getcwd() + "/sample/dev_accuracy.txt", 'wt') as f:
+        f.write('Success rate: {}'.format(correct/len(gold)))
+
 
 pred = load_pred(args.fpred, force_limit=3)
 gold = load_pred(args.fgold)
@@ -33,3 +38,4 @@ for i, (p, g) in enumerate(zip(pred, gold)):
     if args.verbose:
         print('Input {}: {}, {} is {} in {}'.format(i, 'right' if right else 'wrong', g, 'in' if right else 'not in', p))
 print('Success rate: {}'.format(correct/len(gold)))
+write_dev_accuracy(correct, gold)
